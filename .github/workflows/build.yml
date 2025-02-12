@@ -1,0 +1,34 @@
+name: Build
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            GOOS: windows
+          - os: ubuntu-latest
+            GOOS: linux
+          - os: ubuntu-latest
+            GOOS: freebsd
+          - os: ubuntu-latest
+            GOOS: openbsd
+          - os: ubuntu-latest
+            GOOS: netbsd
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - env:
+          GOOS: ${{ matrix.GOOS }}
+        run: |
+          go build ./example/main.go
+          ls -la
