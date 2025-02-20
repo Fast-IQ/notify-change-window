@@ -86,7 +86,7 @@ var (
 			// Смена заголовка окна
 			relayMessage(hwnd)
 		}
-		slog.Debug("found", slog.Any("hwnd", hwnd))
+		//slog.Debug("found", slog.Any("hwnd", hwnd))
 		return 0
 	}
 )
@@ -100,14 +100,14 @@ func Subscribe(ctx context.Context, msgCAW chan MessageCAW) {
 		0,
 		0,
 		WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNTHREAD)
-	slog.Info("Windows Event Hook: ", slog.Any("handler", winEvHook))
+	slog.Debug("Windows Event Hook: ", slog.Any("handler", winEvHook))
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				UnhookWinEvent(winEvHook)
-				slog.Info("Exit Event Hook")
+				slog.Debug("Event Hook Active Window Exit")
 				return
 			case msg := <-messagesCAW:
 				msgCAW <- msg
