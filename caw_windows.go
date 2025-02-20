@@ -2,37 +2,23 @@ package ActiveWindow
 
 import (
 	"context"
+	"fmt"
 	"golang.org/x/sys/windows"
-	"log"
 	"log/slog"
+	"strings"
 	"syscall"
 	"unsafe"
 )
 
-var (
-	messagesCAW = make(chan MessageCAW, 10)
-	user32      = windows.NewLazyDLL("user32.dll")
-	kernel32    = windows.NewLazyDLL("kernel32.dll")
-
-	procSetWinEventHook  = user32.NewProc("SetWinEventHook")
-	procUnhookWinEvent   = user32.NewProc("UnhookWinEvent")
-	procGetMessage       = user32.NewProc("GetMessageW")
-	procGetWindowText    = user32.NewProc("GetWindowTextW")
-	procTranslateMessage = user32.NewProc("TranslateMessage")
-	procDispatchMessage  = user32.NewProc("DispatchMessageW")
-	procGetWindowRect    = user32.NewProc("GetWindowRect")
-
-	procGetModuleHandle     = kernel32.NewProc("GetModuleHandleW")
-	procGetWindowTextLength = user32.NewProc("GetWindowTextLengthW")
-
-	ActiveWinEventHook WINEVENTPROC = func(hWinEventHook HWINEVENTHOOK, event uint32, hwnd HWND, idObject int32, idChild int32, idEventThread uint32, dwmsEventTime uint32) uintptr {
-		relayMessage(hwnd)
-		//		log.Println("fond", WinText)
-		return 0
-	}
+const (
+	EVENT_SYSTEM_FOREGROUND = 3
+	EVENT_OBJECT_NAMECHANGE = 0x800C
+	WINEVENT_OUTOFCONTEXT   = 0
+	WINEVENT_INCONTEXT      = 4
+	WINEVENT_SKIPOWNPROCESS = 2
+	WINEVENT_SKIPOWNTHREAD  = 1
+	OBJID_WINDOW            = 0
 )
-
-type WINEVENTPROC func(hWinEventHook HWINEVENTHOOK, event uint32, hwnd HWND, idObject int32, idChild int32, idEventThread uint32, dwmsEventTime uint32) uintptr
 
 type (
 	HANDLE        uintptr
@@ -54,6 +40,8 @@ type (
 	WCHAR         uint16
 )
 
+type WINEVENTPROC func(hWinEventHook HWINEVENTHOOK, event uint32, hwnd HWND, idObject int32, idChild int32, idEventThread uint32, dwmsEventTime uint32) uintptr
+
 type POINT struct {
 	X, Y int32
 }
@@ -74,25 +62,52 @@ type RECT struct {
 	bottom int32
 }
 
-const (
-	EVENT_SYSTEM_FOREGROUND = 3
-	WINEVENT_OUTOFCONTEXT   = 0
-	WINEVENT_INCONTEXT      = 4
-	WINEVENT_SKIPOWNPROCESS = 2
-	WINEVENT_SKIPOWNTHREAD  = 1
+var (
+	aHWND       HWND
+	messagesCAW = make(chan MessageCAW, 10)
+	user32      = windows.NewLazyDLL("user32.dll")
+	//kernel32    = windows.NewLazyDLL("kernel32.dll")
+
+	procSetWinEventHook     = user32.NewProc("SetWinEventHook")
+	procUnhookWinEvent      = user32.NewProc("UnhookWinEvent")
+	procGetMessage          = user32.NewProc("GetMessageW")
+	procGetWindowText       = user32.NewProc("GetWindowTextW")
+	procTranslateMessage    = user32.NewProc("TranslateMessage")
+	procDispatchMessage     = user32.NewProc("DispatchMessageW")
+	procGetWindowRect       = user32.NewProc("GetWindowRect")
+	procGetWindowTextLength = user32.NewProc("GetWindowTextLengthW")
+
+	ActiveWinEventHook WINEVENTPROC = func(hWinEventHook HWINEVENTHOOK, event uint32, hwnd HWND, idObject int32, idChild int32, idEventThread uint32, dwmsEventTime uint32) uintptr {
+		if event == EVENT_SYSTEM_FOREGROUND {
+			// Смена активного окна
+			aHWND = hwnd
+			relayMessage(hwnd)
+		} else if event == EVENT_OBJECT_NAMECHANGE && idObject == OBJID_WINDOW && aHWND == hwnd {
+			// Смена заголовка окна
+			relayMessage(hwnd)
+		}
+		slog.Debug("found", slog.Any("hwnd", hwnd))
+		return 0
+	}
 )
 
 func Subscribe(ctx context.Context, msgCAW chan MessageCAW) {
 
-	winEvHook := SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, 0, ActiveWinEventHook, 0, 0, WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS)
+	winEvHook := SetWinEventHook(EVENT_SYSTEM_FOREGROUND,
+		EVENT_OBJECT_NAMECHANGE,
+		0,
+		ActiveWinEventHook,
+		0,
+		0,
+		WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNTHREAD)
 	slog.Info("Windows Event Hook: ", slog.Any("handler", winEvHook))
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				slog.Info("Exit Event Hook")
 				UnhookWinEvent(winEvHook)
+				slog.Info("Exit Event Hook")
 				return
 			case msg := <-messagesCAW:
 				msgCAW <- msg
@@ -112,9 +127,7 @@ func Subscribe(ctx context.Context, msgCAW chan MessageCAW) {
 
 func relayMessage(h HWND) {
 	msgCAW := MessageCAW{
-		hwnd:       h,
-		WindowName: GetWindowText(h),
-		WindowRect: GetWindowRect(h),
+		Hwnd: h,
 	}
 
 	msgCAW.ChanOk = make(chan int)
@@ -180,19 +193,44 @@ func GetWindowRect(hwnd HWND) windows.Rect {
 	return rect
 }
 
-func GetModuleHandle(modulename string) HINSTANCE {
-	var mn uintptr
-	if modulename == "" {
-		mn = 0
-	} else {
-		uMN, err := syscall.UTF16PtrFromString(modulename)
-		if err != nil {
-			log.Println(err)
-		}
-		mn = uintptr(unsafe.Pointer(uMN))
+func GetNameApp(hwnd HWND) (string, error) {
+	// Получаем PID по HWND
+	var pid uint32
+	_, err := windows.GetWindowThreadProcessId(windows.HWND(hwnd), &pid)
+	if err != nil {
+		fmt.Println("GetWindowThreadProcessId failed:", err)
+		return "", err
 	}
-	ret, _, _ := procGetModuleHandle.Call(mn)
-	return HINSTANCE(ret)
+
+	// Открываем процесс по PID
+	processHandle, err := windows.OpenProcess(
+		windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ,
+		false,
+		pid,
+	)
+	if err != nil {
+		fmt.Println("OpenProcess failed:", err)
+		return "", err
+	}
+	defer func() { _ = windows.CloseHandle(processHandle) }()
+
+	// Получаем имя исполняемого файла процесса
+	var path [windows.MAX_PATH]uint16
+	size := uint32(len(path))
+
+	// Используем QueryFullProcessImageNameW
+	err = windows.QueryFullProcessImageName(processHandle, 0, &path[0], &size)
+	if err != nil {
+		fmt.Println("QueryFullProcessImageName failed:", err)
+		return "", err
+	}
+
+	// Преобразуем путь в строку
+	name := windows.UTF16ToString(path[:size])
+	idx := strings.LastIndex(name, "\\")
+	name = name[idx+1:]
+
+	return name, nil
 }
 
 func GetMessage(msg *MSG, hwnd HWND, msgFilterMin UINT, msgFilterMax UINT) int {

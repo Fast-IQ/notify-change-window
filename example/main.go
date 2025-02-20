@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 )
 
 func main() {
@@ -32,10 +31,13 @@ func main() {
 	for {
 		select {
 		case msg := <-windMsg:
-			fmt.Println("windMsg:", msg.WindowName)
+			name, err := ncw.GetNameApp(msg.Hwnd)
+			if err != nil {
+				fmt.Println("Error", err)
+			}
+			rect := ncw.GetWindowRect(msg.Hwnd)
+			fmt.Println("name app:", name, "windMsg:", ncw.GetWindowText(msg.Hwnd), "rect:", rect)
 		case <-ctx.Done():
-			goto End
-		case <-time.After(time.Second * 10):
 			goto End
 		}
 	}
