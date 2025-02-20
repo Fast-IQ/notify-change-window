@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -38,6 +39,8 @@ func main() {
 			rect := ncw.GetWindowRect(msg.Hwnd)
 			fmt.Println("name app:", name, "windMsg:", ncw.GetWindowText(msg.Hwnd), "rect:", rect)
 		case <-ctx.Done():
+			goto End
+		case <-time.After(2 * time.Minute):
 			goto End
 		}
 	}

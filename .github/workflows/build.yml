@@ -12,14 +12,6 @@ jobs:
         include:
           - os: ubuntu-latest
             GOOS: windows
-          - os: ubuntu-latest
-            GOOS: linux
-          - os: ubuntu-latest
-            GOOS: freebsd
-          - os: ubuntu-latest
-            GOOS: openbsd
-          - os: ubuntu-latest
-            GOOS: netbsd
     steps:
       - uses: actions/checkout@v4
 
