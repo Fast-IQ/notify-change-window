@@ -2,7 +2,6 @@ package ActiveWindow
 
 import (
 	"context"
-	"fmt"
 	"golang.org/x/sys/windows"
 	"log/slog"
 	"strings"
@@ -198,7 +197,7 @@ func GetNameApp(hwnd HWND) (string, error) {
 	var pid uint32
 	_, err := windows.GetWindowThreadProcessId(windows.HWND(hwnd), &pid)
 	if err != nil {
-		fmt.Println("GetWindowThreadProcessId failed:", err)
+		slog.Error("GetWindowThreadProcessId failed:", slog.Any("error", err))
 		return "", err
 	}
 
@@ -209,7 +208,7 @@ func GetNameApp(hwnd HWND) (string, error) {
 		pid,
 	)
 	if err != nil {
-		fmt.Println("OpenProcess failed:", err)
+		slog.Error("OpenProcess failed:", slog.Any("error", err), slog.Any("pid", pid))
 		return "", err
 	}
 	defer func() { _ = windows.CloseHandle(processHandle) }()
@@ -221,7 +220,7 @@ func GetNameApp(hwnd HWND) (string, error) {
 	// Используем QueryFullProcessImageNameW
 	err = windows.QueryFullProcessImageName(processHandle, 0, &path[0], &size)
 	if err != nil {
-		fmt.Println("QueryFullProcessImageName failed:", err)
+		slog.Error("QueryFullProcessImageName failed:", slog.Any("error", err))
 		return "", err
 	}
 
